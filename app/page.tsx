@@ -11,6 +11,7 @@ import {
   SavedRepoItem,
 } from "@/lib/types";
 import { parseGitHubUrl } from "@/lib/github";
+import { filterSavedRepos } from "@/lib/filters";
 
 const STORAGE_KEY = "prt-tracker-repos";
 
@@ -58,9 +59,10 @@ export default function HomePage() {
   // Persistent tracked repos from localStorage
   const [savedRepos, setSavedRepos] = useState<SavedRepoItem[]>([]);
 
-  // Two independent filter groups: Port platforms (teal) and Original consoles (purple)
+  // Three independent filter groups: Port platforms (teal), Original consoles (purple), Approach (amber)
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [selectedConsoles, setSelectedConsoles] = useState<string[]>([]);
+  const [selectedApproaches, setSelectedApproaches] = useState<string[]>([]);
 
   const resultCardRef = useRef<HTMLDivElement>(null);
 
@@ -112,54 +114,31 @@ export default function HomePage() {
       .map(([name, count]) => ({ name, count }));
   }, [savedRepos]);
 
-  /**
-   * Filter logic:
-   * - Within a single group: OR logic (any selected value matches).
-   * - Between groups: AND logic (repo must match a selected port platform AND a selected console).
-   * - A group with no selections does not restrict results.
-   * - Repos with an empty array in a group are hidden only while that group has an active selection.
-   */
+  // Compute available Port Approaches from saved repos with occurrence counts
+  const availableApproaches = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of savedRepos) {
+      const approach = (item.result?.approach || "unknown").toLowerCase();
+      map.set(approach, (map.get(approach) || 0) + 1);
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }));
+  }, [savedRepos]);
+
+  // Filter saved repos using centralized filter logic from lib/filters.ts
   const filteredSavedRepos = useMemo(() => {
-    return savedRepos.filter((item) => {
-      const itemPlatforms = Array.isArray(item.result?.platforms)
-        ? item.result.platforms
-        : [];
-      const itemConsoles = Array.isArray(item.result?.consoles)
-        ? item.result.consoles
-        : [];
-
-      // 1. Check Port platforms filter group
-      if (selectedPlatforms.length > 0) {
-        if (itemPlatforms.length === 0) {
-          return false;
-        }
-        const matchesPlatform = selectedPlatforms.some((sp) =>
-          itemPlatforms.includes(sp)
-        );
-        if (!matchesPlatform) {
-          return false;
-        }
-      }
-
-      // 2. Check Original consoles filter group
-      if (selectedConsoles.length > 0) {
-        if (itemConsoles.length === 0) {
-          return false;
-        }
-        const matchesConsole = selectedConsoles.some((sc) =>
-          itemConsoles.includes(sc)
-        );
-        if (!matchesConsole) {
-          return false;
-        }
-      }
-
-      return true;
+    return filterSavedRepos(savedRepos, {
+      platforms: selectedPlatforms,
+      consoles: selectedConsoles,
+      approaches: selectedApproaches,
     });
-  }, [savedRepos, selectedPlatforms, selectedConsoles]);
+  }, [savedRepos, selectedPlatforms, selectedConsoles, selectedApproaches]);
 
   const hasActiveFilters =
-    selectedPlatforms.length > 0 || selectedConsoles.length > 0;
+    selectedPlatforms.length > 0 ||
+    selectedConsoles.length > 0 ||
+    selectedApproaches.length > 0;
 
   // Client-side quick validation for github.com URLs
   const validateUrl = (input: string): boolean => {
@@ -186,6 +165,7 @@ export default function HomePage() {
     }
 
     const parsed = parseGitHubUrl(inputUrl);
+    // Cache key & storage key normalized to lowercase
     const repoId = parsed
       ? `${parsed.owner.toLowerCase()}/${parsed.repo.toLowerCase()}`
       : inputUrl.toLowerCase();
@@ -217,7 +197,7 @@ export default function HomePage() {
         setCached(Boolean(data.cached));
         setActiveSavedId(repoId);
 
-        // Save repository persistently in localStorage (avoiding duplicates)
+        // Save repository persistently in localStorage (avoiding duplicates by normalized ID)
         const newItem: SavedRepoItem = {
           id: repoId,
           owner: parsed ? parsed.owner : "owner",
@@ -303,7 +283,7 @@ export default function HomePage() {
     }
   };
 
-  // Toggle filter chips
+  // Filter toggle handlers
   const handleTogglePlatform = (platformName: string) => {
     setSelectedPlatforms((prev) =>
       prev.includes(platformName)
@@ -328,9 +308,22 @@ export default function HomePage() {
     setSelectedConsoles([]);
   };
 
+  const handleToggleApproach = (approachName: string) => {
+    setSelectedApproaches((prev) =>
+      prev.includes(approachName)
+        ? prev.filter((a) => a !== approachName)
+        : [...prev, approachName]
+    );
+  };
+
+  const handleClearApproaches = () => {
+    setSelectedApproaches([]);
+  };
+
   const handleClearAllFilters = () => {
     setSelectedPlatforms([]);
     setSelectedConsoles([]);
+    setSelectedApproaches([]);
   };
 
   return (
@@ -355,8 +348,8 @@ export default function HomePage() {
 
             <p className="max-w-xl mx-auto text-base sm:text-lg text-zinc-400">
               Analyze unofficial video game ports, decompilations, and engine
-              recreations. Identify original consoles, target platforms, and
-              latest releases.
+              recreations. Identify programming language, approach, original consoles,
+              target platforms, and latest releases.
             </p>
           </header>
 
@@ -393,7 +386,7 @@ export default function HomePage() {
               <button
                 type="submit"
                 disabled={loading || !url.trim()}
-                className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-medium text-sm text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-lg shadow-indigo-950/40 shrink-0"
+                className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-medium text-sm text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-lg shadow-indigo-950/40 shrink-0 cursor-pointer"
               >
                 {loading ? (
                   <>
@@ -463,7 +456,7 @@ export default function HomePage() {
               </h3>
               <p className="text-sm text-zinc-400 max-w-md mx-auto">
                 Fetching repository metadata, parsing raw README documentation,
-                and prompting Gemini to extract original console and port details...
+                and prompting Gemini to extract language, approach, original console, and port details...
               </p>
               <div className="w-48 h-1.5 bg-zinc-800 rounded-full mx-auto overflow-hidden">
                 <div className="w-full h-full bg-indigo-500 origin-left animate-pulse" />
@@ -494,7 +487,7 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => setError(null)}
-                className="text-red-400 hover:text-red-200 transition"
+                className="text-red-400 hover:text-red-200 transition cursor-pointer"
                 title="Dismiss"
               >
                 <svg
@@ -542,9 +535,11 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Filter Section: Two distinct groups with independent chips and clear buttons */}
+            {/* Filter Section: Three distinct groups with independent chips and clear buttons */}
             {savedRepos.length > 0 &&
-              (availablePlatforms.length > 0 || availableConsoles.length > 0) && (
+              (availablePlatforms.length > 0 ||
+                availableConsoles.length > 0 ||
+                availableApproaches.length > 0) && (
                 <div className="mb-6 space-y-4 p-5 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 backdrop-blur-sm">
                   {/* Group 1: Port platforms (Teal Accent) */}
                   {availablePlatforms.length > 0 && (
@@ -620,6 +615,50 @@ export default function HomePage() {
                             selected={selectedConsoles.includes(name)}
                             onClick={() => handleToggleConsole(name)}
                             color="purple"
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Group 3: Approach (Amber Accent) */}
+                  {availableApproaches.length > 0 && (
+                    <div
+                      className={
+                        availablePlatforms.length > 0 ||
+                        availableConsoles.length > 0
+                          ? "pt-4 border-t border-zinc-800/60"
+                          : ""
+                      }
+                    >
+                      <div className="flex items-center justify-between gap-3 mb-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-wider text-amber-400">
+                            Approach
+                          </span>
+                          <span className="text-[11px] text-zinc-500">
+                            (Porting methodology)
+                          </span>
+                        </div>
+                        {selectedApproaches.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleClearApproaches}
+                            className="text-xs text-amber-400 hover:text-amber-300 underline underline-offset-2 transition cursor-pointer"
+                          >
+                            Clear ({selectedApproaches.length})
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {availableApproaches.map(({ name, count }) => (
+                          <ConsoleChip
+                            key={name}
+                            name={name}
+                            count={count}
+                            selected={selectedApproaches.includes(name)}
+                            onClick={() => handleToggleApproach(name)}
+                            color="amber"
                           />
                         ))}
                       </div>

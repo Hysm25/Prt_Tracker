@@ -3,6 +3,15 @@
  */
 
 /**
+ * Porting approaches/methodologies for unofficial video game ports
+ */
+export type PortApproach =
+  | "recompilation"
+  | "decompilation"
+  | "reimplementation"
+  | "unknown";
+
+/**
  * Information regarding the latest release of the game port
  */
 export interface LatestRelease {
@@ -17,6 +26,8 @@ export interface LatestRelease {
 export interface PortAnalysisResult {
   projectName: string;
   originalGame: string;
+  language: string; // main programming language, or "unknown"
+  approach: PortApproach; // exactly one of "recompilation", "decompilation", "reimplementation", "unknown"
   consoles: string[]; // Original console(s) the game released on, e.g. ["N64", "GameCube"]
   platforms: string[]; // Target ports, e.g. ["Windows", "Linux", "macOS", "Steam Deck"]
   latestRelease: LatestRelease | null;

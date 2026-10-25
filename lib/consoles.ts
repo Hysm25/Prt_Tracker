@@ -158,9 +158,15 @@ export function normalizeConsoles(rawConsoles: unknown[]): string[] {
       continue;
     }
 
-    // Check partial alias matching
+    // Check partial alias matching (using word boundaries for short abbreviations)
     for (const [alias, canonical] of Object.entries(CONSOLE_ALIASES)) {
-      if (clean.includes(alias) || alias.includes(clean)) {
+      if (alias.length <= 3) {
+        const regex = new RegExp(`(^|[^a-z0-9])${alias}([^a-z0-9]|$)`, "i");
+        if (regex.test(clean)) {
+          normalizedSet.add(canonical);
+          break;
+        }
+      } else if (clean.includes(alias)) {
         normalizedSet.add(canonical);
         break;
       }

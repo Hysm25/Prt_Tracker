@@ -10,6 +10,16 @@ interface SavedRepoCardProps {
   onReanalyze: (url: string, e: React.MouseEvent) => void;
 }
 
+const APPROACH_TOOLTIPS: Record<string, string> = {
+  recompilation:
+    "Static or binary recompilation directly from original game executable or bytecode",
+  decompilation:
+    "Reverse-engineered source code recreation matching original binaries",
+  reimplementation:
+    "Clean-room or engine rewrite recreating game assets and logic",
+  unknown: "Porting approach or methodology not explicitly specified",
+};
+
 export function SavedRepoCard({
   item,
   isSelected,
@@ -22,12 +32,17 @@ export function SavedRepoCard({
   const url = item.url;
   const githubUrl = repoMetadata?.htmlUrl || url;
 
-  // Defensive handling for missing fields in stored entries
+  // Defensive handling for missing fields in stored entries (defaulting to "unknown")
   const projectName = result.projectName || item.repo || "Unknown Project";
   const originalGame = result.originalGame || "Unknown Game";
+  const language = result.language || "unknown";
+  const approach = result.approach || "unknown";
   const consoles = Array.isArray(result.consoles) ? result.consoles : [];
   const platforms = Array.isArray(result.platforms) ? result.platforms : [];
   const latestRelease = result.latestRelease || null;
+
+  const approachTooltip =
+    APPROACH_TOOLTIPS[approach.toLowerCase()] || APPROACH_TOOLTIPS.unknown;
 
   return (
     <div
@@ -50,7 +65,10 @@ export function SavedRepoCard({
         </div>
 
         {/* Action buttons */}
-        <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="flex items-center gap-1.5 shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
           {/* Re-analyze button */}
           <button
             type="button"
@@ -58,8 +76,18 @@ export function SavedRepoCard({
             className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-750 transition"
             title="Re-analyze repository"
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            <svg
+              className="w-3.5 h-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
             </svg>
           </button>
 
@@ -71,8 +99,18 @@ export function SavedRepoCard({
             className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-750 transition"
             title="Open in GitHub"
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            <svg
+              className="w-3.5 h-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
             </svg>
           </a>
 
@@ -83,11 +121,41 @@ export function SavedRepoCard({
             className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition"
             title="Remove from saved ports"
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            <svg
+              className="w-3.5 h-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+              />
             </svg>
           </button>
         </div>
+      </div>
+
+      {/* Language small tag & Approach labeled badge with tooltip */}
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <span
+          className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-zinc-800 text-zinc-300 border border-zinc-700"
+          title={`Programming language: ${language}`}
+        >
+          {language}
+        </span>
+
+        <span
+          title={approachTooltip}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/25 cursor-help"
+        >
+          <span className="text-[10px] text-amber-400/80 uppercase font-semibold">
+            Approach:
+          </span>
+          <span className="capitalize">{approach}</span>
+        </span>
       </div>
 
       {/* Middle row: Original Console Tags */}

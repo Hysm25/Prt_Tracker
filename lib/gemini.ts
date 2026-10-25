@@ -1,5 +1,12 @@
-import { GitHubRepoData, PortAnalysisResult } from "./types";
+import { GitHubRepoData, PortAnalysisResult, PortApproach } from "./types";
 import { normalizeConsoles, KNOWN_CONSOLES } from "./consoles";
+
+const VALID_APPROACHES: readonly PortApproach[] = [
+  "recompilation",
+  "decompilation",
+  "reimplementation",
+  "unknown",
+] as const;
 
 /**
  * Strips markdown code fences (e.g. ```json ... ```) from a text response.
@@ -17,8 +24,8 @@ function cleanJsonText(rawText: string): string {
 }
 
 /**
- * Analyzes repository data using Google Gemini 2.0 Flash to extract structured
- * information regarding the unofficial game port project and original consoles.
+ * Analyzes repository data using Google Gemini to extract structured
+ * information regarding the unofficial game port project, including language and approach.
  */
 export async function analyzeWithGemini(
   repoData: GitHubRepoData
@@ -77,6 +84,8 @@ Return ONLY valid JSON (no markdown fences, no conversational preamble or postsc
 {
   "projectName": string,
   "originalGame": string,
+  "language": string,
+  "approach": "recompilation" | "decompilation" | "reimplementation" | "unknown",
   "consoles": string[],
   "platforms": string[],
   "latestRelease": {
@@ -89,10 +98,17 @@ Return ONLY valid JSON (no markdown fences, no conversational preamble or postsc
 ### EXTRACTION RULES:
 1. "projectName": The official name of this port / engine recreation / decomp project (e.g. "Dusklight", "Ship of Harkinian", "OpenGOAL", "sm64ex", "OpenMW"). If ambiguous, use the repository name.
 2. "originalGame": The original commercial video game being ported or reimplemented (e.g. "The Legend of Zelda: Twilight Princess", "The Legend of Zelda: Ocarina of Time", "Jak and Daxter: The Precursor Legacy", "Super Mario 64", "The Elder Scrolls III: Morrowind").
-3. "consoles": Array of original retro console(s) or hardware systems that the original game was released on historically (e.g. ["GameCube", "Wii"] for Twilight Princess, ["N64"] for Super Mario 64, ["PS2"] for Jak and Daxter, ["PS1"] for Metal Gear Solid). Pick from or match these canonical names:
+3. "language": Main programming language of the port project (e.g. "C++", "C", "Rust", "C#", "Go", "Python"), or "unknown". Base this ONLY on the README, description, topics, and release info provided. Answer "unknown" rather than guessing.
+4. "approach": Exactly one of: "recompilation", "decompilation", "reimplementation", "unknown".
+   - "recompilation": static/binary recompilation from original executable or bytecode.
+   - "decompilation": reverse-engineered source matching original binaries.
+   - "reimplementation": recreation/rewrite of the game engine or mechanics.
+   - "unknown": not clearly specified.
+   Base this ONLY on the README, description, topics, and release info provided. Answer "unknown" rather than guessing.
+5. "consoles": Array of original retro console(s) or hardware systems that the original game was released on historically (e.g. ["GameCube", "Wii"] for Twilight Princess, ["N64"] for Super Mario 64, ["PS2"] for Jak and Daxter, ["PS1"] for Metal Gear Solid). Pick from or match these canonical names:
    ${KNOWN_CONSOLES.join(", ")}
-4. "platforms": An array of target operating systems and platforms supported or targeted by this PORT project (e.g. ["Windows", "Linux", "macOS", "Steam Deck", "Android", "iOS", "Nintendo Switch", "PS Vita"]). Keep these separate from original console releases.
-5. "latestRelease":
+6. "platforms": An array of target operating systems and platforms supported or targeted by this PORT project (e.g. ["Windows", "Linux", "macOS", "Steam Deck", "Android", "iOS", "Nintendo Switch", "PS Vita"]). Keep these separate from original console releases.
+7. "latestRelease":
    - If a latest release exists in the repository data, populate:
      - "version": the version string or tag (e.g. "v2.0.3").
      - "date": the release date in a clean readable format (e.g. "YYYY-MM-DD" or "Month DD, YYYY").
@@ -181,6 +197,21 @@ Return ONLY valid JSON (no markdown fences, no conversational preamble or postsc
       ? resultObj.originalGame.trim()
       : "Unknown Game";
 
+  // Validate language (defaults to "unknown")
+  const language =
+    typeof resultObj.language === "string" && resultObj.language.trim()
+      ? resultObj.language.trim()
+      : "unknown";
+
+  // Validate approach (must be one of VALID_APPROACHES, defaults to "unknown")
+  let approach: PortApproach = "unknown";
+  if (typeof resultObj.approach === "string") {
+    const cleanApproach = resultObj.approach.trim().toLowerCase();
+    if (VALID_APPROACHES.includes(cleanApproach as PortApproach)) {
+      approach = cleanApproach as PortApproach;
+    }
+  }
+
   // Validate consoles against the canonical KNOWN_CONSOLES list
   const rawConsoles = Array.isArray(resultObj.consoles)
     ? resultObj.consoles
@@ -238,6 +269,8 @@ Return ONLY valid JSON (no markdown fences, no conversational preamble or postsc
   return {
     projectName,
     originalGame,
+    language,
+    approach,
     consoles,
     platforms: uniquePlatforms,
     latestRelease,
