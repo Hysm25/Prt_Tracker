@@ -1,5 +1,6 @@
 import React from "react";
 import { PortAnalysisResult, GitHubRepoMetadata } from "@/lib/types";
+import { ConsoleChip } from "./ConsoleChip";
 
 interface ResultCardProps {
   result: PortAnalysisResult;
@@ -37,7 +38,7 @@ function getPlatformBadgeClasses(platform: string): string {
 }
 
 export function ResultCard({ result, repo, cached }: ResultCardProps) {
-  const { projectName, originalGame, platforms, latestRelease } = result;
+  const { projectName, originalGame, consoles, platforms, latestRelease } = result;
 
   return (
     <div className="w-full max-w-2xl mx-auto rounded-2xl border border-zinc-800 bg-zinc-900/90 shadow-2xl backdrop-blur-xl p-6 sm:p-8 transition-all hover:border-zinc-700">
@@ -101,10 +102,29 @@ export function ResultCard({ result, repo, cached }: ResultCardProps) {
         </div>
       </div>
 
+      {/* Original Consoles / Native Platform (Separate from target platforms) */}
+      {consoles && consoles.length > 0 && (
+        <div className="py-5 border-b border-zinc-800/80">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              Native Platform(s)
+            </span>
+            <span className="text-[11px] text-zinc-500">
+              (Original console release)
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {consoles.map((consoleName) => (
+              <ConsoleChip key={consoleName} name={consoleName} interactive={false} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Target Platforms Badges */}
       <div className="py-5 border-b border-zinc-800/80">
         <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-          Supported Platforms
+          Port Target Platforms
         </span>
         <div className="mt-3 flex flex-wrap gap-2">
           {platforms.map((platform) => (

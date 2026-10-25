@@ -1,32 +1,50 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { ResultCard } from "@/components/ResultCard";
-import { AnalyzeResponse, PortAnalysisResult, GitHubRepoMetadata } from "@/lib/types";
+import { SavedRepoCard } from "@/components/SavedRepoCard";
+import { ConsoleChip } from "@/components/ConsoleChip";
+import {
+  AnalyzeResponse,
+  PortAnalysisResult,
+  GitHubRepoMetadata,
+  SavedRepoItem,
+} from "@/lib/types";
+import { parseGitHubUrl } from "@/lib/github";
 
-// Quick-select curated repository examples
-const EXAMPLE_REPOS = [
-  {
-    name: "TwilitRealm/dusk",
-    url: "https://github.com/TwilitRealm/dusk",
-    label: "Twilight Princess (Dusklight)",
-  },
-  {
-    name: "HarbourMasters/Shipwright",
-    url: "https://github.com/HarbourMasters/Shipwright",
-    label: "Ocarina of Time (Ship of Harkinian)",
-  },
-  {
-    name: "open-goal/jak-project",
-    url: "https://github.com/open-goal/jak-project",
-    label: "Jak and Daxter (OpenGOAL)",
-  },
-  {
-    name: "sm64pc/sm64ex",
-    url: "https://github.com/sm64pc/sm64ex",
-    label: "Super Mario 64 (sm64ex)",
-  },
-];
+const STORAGE_KEY = "prt-tracker-repos";
+
+/**
+ * Safely loads saved repositories from localStorage
+ */
+function loadSavedRepos(): SavedRepoItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is SavedRepoItem =>
+        Boolean(item && typeof item === "object" && item.id && item.result)
+    );
+  } catch (err) {
+    console.warn("Error reading prt-tracker-repos from localStorage:", err);
+    return [];
+  }
+}
+
+/**
+ * Safely writes saved repositories to localStorage
+ */
+function persistSavedRepos(items: SavedRepoItem[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  } catch (err) {
+    console.warn("Error writing prt-tracker-repos to localStorage:", err);
+  }
+}
 
 export default function HomePage() {
   const [url, setUrl] = useState("");
@@ -35,6 +53,55 @@ export default function HomePage() {
   const [result, setResult] = useState<PortAnalysisResult | null>(null);
   const [repo, setRepo] = useState<GitHubRepoMetadata | null>(null);
   const [cached, setCached] = useState<boolean>(false);
+  const [activeSavedId, setActiveSavedId] = useState<string | null>(null);
+
+  // Persistent tracked repos from localStorage
+  const [savedRepos, setSavedRepos] = useState<SavedRepoItem[]>([]);
+  const [selectedConsoles, setSelectedConsoles] = useState<string[]>([]);
+
+  const resultCardRef = useRef<HTMLDivElement>(null);
+
+  // Hydrate saved repos on client mount
+  useEffect(() => {
+    const initial = loadSavedRepos();
+    setSavedRepos(initial);
+  }, []);
+
+  // Compute available native platforms from currently saved repositories with counts
+  const availableConsoles = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of savedRepos) {
+      const consoles = item.result.consoles;
+      if (Array.isArray(consoles)) {
+        for (const c of consoles) {
+          if (c && typeof c === "string") {
+            map.set(c, (map.get(c) || 0) + 1);
+          }
+        }
+      }
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }));
+  }, [savedRepos]);
+
+  // Filtered saved repos based on selected native platform filter chips
+  const filteredSavedRepos = useMemo(() => {
+    if (selectedConsoles.length === 0) {
+      return savedRepos;
+    }
+    return savedRepos.filter((item) => {
+      const itemConsoles = item.result.consoles;
+      // Repos with an empty consoles array should be hidden when any filter is active
+      if (!Array.isArray(itemConsoles) || itemConsoles.length === 0) {
+        return false;
+      }
+      // OR logic: show repo if its native platforms include at least one selected value
+      return selectedConsoles.some((selected) =>
+        itemConsoles.includes(selected)
+      );
+    });
+  }, [savedRepos, selectedConsoles]);
 
   // Client-side quick validation for github.com URLs
   const validateUrl = (input: string): boolean => {
@@ -43,9 +110,11 @@ export default function HomePage() {
       return false;
     }
     const trimmed = input.trim();
-    const githubRegex = /^(https?:\/\/)?(www\.)?github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+/i;
-    if (!githubRegex.test(trimmed)) {
-      setError("Invalid URL. Only github.com repository URLs are accepted (e.g. https://github.com/TwilitRealm/dusk).");
+    const parsed = parseGitHubUrl(trimmed);
+    if (!parsed) {
+      setError(
+        "Invalid URL. Only github.com repository URLs are accepted (e.g. https://github.com/TwilitRealm/dusk)."
+      );
       return false;
     }
     return true;
@@ -57,6 +126,11 @@ export default function HomePage() {
     if (!validateUrl(inputUrl)) {
       return;
     }
+
+    const parsed = parseGitHubUrl(inputUrl);
+    const repoId = parsed
+      ? `${parsed.owner.toLowerCase()}/${parsed.repo.toLowerCase()}`
+      : inputUrl.toLowerCase();
 
     setLoading(true);
     setError(null);
@@ -83,6 +157,32 @@ export default function HomePage() {
         setResult(data.data);
         setRepo(data.repo || null);
         setCached(Boolean(data.cached));
+        setActiveSavedId(repoId);
+
+        // Save repository persistently in localStorage (avoiding duplicates)
+        const newItem: SavedRepoItem = {
+          id: repoId,
+          owner: parsed ? parsed.owner : "owner",
+          repo: parsed ? parsed.repo : "repo",
+          url: inputUrl,
+          analyzedAt: Date.now(),
+          result: data.data,
+          repoMetadata: data.repo,
+        };
+
+        setSavedRepos((prev) => {
+          const remaining = prev.filter(
+            (item) => item.id.toLowerCase() !== repoId.toLowerCase()
+          );
+          const updated = [newItem, ...remaining];
+          persistSavedRepos(updated);
+          return updated;
+        });
+
+        // Scroll smoothly to results card
+        setTimeout(() => {
+          resultCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 100);
       } else {
         throw new Error("No analysis data returned from server.");
       }
@@ -102,9 +202,55 @@ export default function HomePage() {
     handleAnalyze();
   };
 
-  const handleSelectExample = (exampleUrl: string) => {
-    setUrl(exampleUrl);
-    handleAnalyze(exampleUrl);
+  // Clicking a saved repo displays its stored result instantly
+  const handleSelectSaved = (saved: SavedRepoItem) => {
+    setUrl(saved.url);
+    setResult(saved.result);
+    setRepo(saved.repoMetadata || null);
+    setCached(false);
+    setError(null);
+    setActiveSavedId(saved.id);
+
+    setTimeout(() => {
+      resultCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+  };
+
+  // Re-run analysis for a saved repository
+  const handleReanalyzeSaved = (savedUrl: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setUrl(savedUrl);
+    handleAnalyze(savedUrl);
+  };
+
+  // Remove a saved repository
+  const handleRemoveSaved = (idToRemove: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSavedRepos((prev) => {
+      const updated = prev.filter(
+        (item) => item.id.toLowerCase() !== idToRemove.toLowerCase()
+      );
+      persistSavedRepos(updated);
+      return updated;
+    });
+
+    if (activeSavedId === idToRemove) {
+      setActiveSavedId(null);
+    }
+  };
+
+  // Toggle native platform filter chip
+  const handleToggleConsoleFilter = (consoleName: string) => {
+    setSelectedConsoles((prev) =>
+      prev.includes(consoleName)
+        ? prev.filter((c) => c !== consoleName)
+        : [...prev, consoleName]
+    );
+  };
+
+  // Clear all selected native platform filters
+  const handleClearFilters = () => {
+    setSelectedConsoles([]);
   };
 
   return (
@@ -114,13 +260,13 @@ export default function HomePage() {
         <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[400px] bg-gradient-to-tr from-indigo-600/15 via-purple-600/10 to-teal-500/10 blur-3xl opacity-70" />
       </div>
 
-      <div className="relative z-10 flex-1 flex flex-col justify-between max-w-4xl w-full mx-auto px-4 py-12 sm:py-16 sm:px-6 lg:px-8">
+      <div className="relative z-10 flex-1 flex flex-col justify-between max-w-5xl w-full mx-auto px-4 py-12 sm:py-16 sm:px-6 lg:px-8">
         <div>
           {/* Header */}
           <header className="text-center space-y-4">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-zinc-900 border border-zinc-800 text-zinc-300 shadow-sm">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              Gemini 2.0 Flash Repo Intelligence
+              Gemini 3.5 Flash Lite Repo Intelligence
             </div>
 
             <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white">
@@ -128,8 +274,8 @@ export default function HomePage() {
             </h1>
 
             <p className="max-w-xl mx-auto text-base sm:text-lg text-zinc-400">
-              Paste an unofficial game port or decompilation GitHub repository to identify the
-              original game, target platforms, and latest release packages.
+              Analyze unofficial video game ports, decompilations, and engine recreations.
+              Identify original consoles, target platforms, and latest releases.
             </p>
           </header>
 
@@ -154,7 +300,7 @@ export default function HomePage() {
                     setUrl(e.target.value);
                     if (error) setError(null);
                   }}
-                  placeholder="https://github.com/TwilitRealm/dusk"
+                  placeholder="https://github.com/owner/repository"
                   disabled={loading}
                   className="w-full pl-11 pr-4 py-3.5 bg-zinc-900 border border-zinc-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl text-zinc-100 placeholder-zinc-500 text-sm transition outline-none disabled:opacity-60 shadow-inner"
                 />
@@ -198,24 +344,6 @@ export default function HomePage() {
                 )}
               </button>
             </form>
-
-            {/* Quick Example Suggestions */}
-            <div className="mt-4">
-              <span className="text-xs text-zinc-500 mr-2">Try an example:</span>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {EXAMPLE_REPOS.map((example) => (
-                  <button
-                    key={example.name}
-                    type="button"
-                    onClick={() => handleSelectExample(example.url)}
-                    disabled={loading}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-400 bg-zinc-900/90 hover:bg-zinc-800 hover:text-zinc-200 border border-zinc-800/80 transition disabled:opacity-50"
-                  >
-                    <span>{example.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
           </section>
 
           {/* Loading Indicator */}
@@ -230,7 +358,7 @@ export default function HomePage() {
                 Analyzing Game Port Repository
               </h3>
               <p className="text-sm text-zinc-400 max-w-md mx-auto">
-                Fetching repository metadata, parsing raw README documentation, and prompting Gemini 2.0 Flash to extract port details...
+                Fetching repository metadata, parsing raw README documentation, and prompting Gemini to extract original console and port details...
               </p>
               <div className="w-48 h-1.5 bg-zinc-800 rounded-full mx-auto overflow-hidden">
                 <div className="w-full h-full bg-indigo-500 origin-left animate-pulse" />
@@ -252,6 +380,7 @@ export default function HomePage() {
                 type="button"
                 onClick={() => setError(null)}
                 className="text-red-400 hover:text-red-200 transition"
+                title="Dismiss"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -262,17 +391,127 @@ export default function HomePage() {
 
           {/* Result Card */}
           {result && !loading && (
-            <div className="mt-8 sm:mt-12">
+            <div ref={resultCardRef} className="mt-8 sm:mt-12">
               <ResultCard result={result} repo={repo || undefined} cached={cached} />
             </div>
           )}
+
+          {/* Saved Tracked Repositories Section */}
+          <section className="mt-14 sm:mt-18 pt-8 border-t border-zinc-800/80">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                  <span>Tracked Repositories</span>
+                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-zinc-800 text-zinc-300">
+                    {savedRepos.length}
+                  </span>
+                </h2>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Repositories saved locally. Click any project to view its analysis or re-analyze.
+                </p>
+              </div>
+            </div>
+
+            {/* Native Platform Filter Section */}
+            {savedRepos.length > 0 && availableConsoles.length > 0 && (
+              <div className="mb-6 p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/60 backdrop-blur-sm">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                      Filter by Native Platform:
+                    </span>
+                    <span className="text-[11px] text-zinc-500">
+                      (Original consoles)
+                    </span>
+                  </div>
+
+                  {selectedConsoles.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleClearFilters}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-zinc-300 hover:text-white bg-zinc-800 hover:bg-zinc-700 transition"
+                      title="Clear selected platform filters"
+                    >
+                      <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      <span>Clear ({selectedConsoles.length})</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {availableConsoles.map(({ name, count }) => (
+                    <ConsoleChip
+                      key={name}
+                      name={name}
+                      count={count}
+                      selected={selectedConsoles.includes(name)}
+                      onClick={() => handleToggleConsoleFilter(name)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Grid of Saved Repos */}
+            {filteredSavedRepos.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredSavedRepos.map((item) => (
+                  <SavedRepoCard
+                    key={item.id}
+                    item={item}
+                    isSelected={activeSavedId === item.id}
+                    onSelect={handleSelectSaved}
+                    onRemove={handleRemoveSaved}
+                    onReanalyze={handleReanalyzeSaved}
+                  />
+                ))}
+              </div>
+            ) : savedRepos.length > 0 ? (
+              <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-8 text-center text-zinc-400">
+                <p className="text-sm">
+                  No saved repositories match the selected native platform filter.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleClearFilters}
+                  className="mt-3 inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition"
+                >
+                  Clear platform filters
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/30 p-8 text-center text-zinc-500">
+                <svg
+                  className="w-8 h-8 mx-auto text-zinc-600 mb-2"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                  />
+                </svg>
+                <p className="text-sm font-medium text-zinc-400">
+                  No repositories tracked yet
+                </p>
+                <p className="text-xs text-zinc-500 mt-1">
+                  Paste a game port repository URL above to analyze and automatically save it to your tracked list.
+                </p>
+              </div>
+            )}
+          </section>
         </div>
 
         {/* Minimal Footer */}
         <footer className="mt-16 pt-8 border-t border-zinc-800/80 text-center text-xs text-zinc-500 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p>Unofficial Game Port Repository Analyzer</p>
+          <p>Game Port Tracker & Analyzer</p>
           <div className="flex items-center gap-4">
-            <span>Powered by Gemini 2.0 Flash</span>
+            <span>Powered by Gemini 3.5 Flash Lite</span>
             <span>•</span>
             <span>GitHub REST API</span>
           </div>

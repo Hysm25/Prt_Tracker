@@ -1,4 +1,5 @@
 import { GitHubRepoData, PortAnalysisResult } from "./types";
+import { normalizeConsoles, KNOWN_CONSOLES } from "./consoles";
 
 /**
  * Strips markdown code fences (e.g. ```json ... ```) from a text response.
@@ -17,7 +18,7 @@ function cleanJsonText(rawText: string): string {
 
 /**
  * Analyzes repository data using Google Gemini 2.0 Flash to extract structured
- * information regarding the unofficial game port project.
+ * information regarding the unofficial game port project and original consoles.
  */
 export async function analyzeWithGemini(
   repoData: GitHubRepoData
@@ -76,6 +77,7 @@ Return ONLY valid JSON (no markdown fences, no conversational preamble or postsc
 {
   "projectName": string,
   "originalGame": string,
+  "consoles": string[],
   "platforms": string[],
   "latestRelease": {
     "version": string,
@@ -87,8 +89,10 @@ Return ONLY valid JSON (no markdown fences, no conversational preamble or postsc
 ### EXTRACTION RULES:
 1. "projectName": The official name of this port / engine recreation / decomp project (e.g. "Dusklight", "Ship of Harkinian", "OpenGOAL", "sm64ex", "OpenMW"). If ambiguous, use the repository name.
 2. "originalGame": The original commercial video game being ported or reimplemented (e.g. "The Legend of Zelda: Twilight Princess", "The Legend of Zelda: Ocarina of Time", "Jak and Daxter: The Precursor Legacy", "Super Mario 64", "The Elder Scrolls III: Morrowind").
-3. "platforms": An array of operating systems and platforms supported or targeted (e.g. ["Windows", "Linux", "macOS", "Steam Deck", "Android", "iOS", "Nintendo Switch", "PS Vita"]). Normalize names cleanly.
-4. "latestRelease":
+3. "consoles": Array of original retro console(s) or hardware systems that the original game was released on historically (e.g. ["GameCube", "Wii"] for Twilight Princess, ["N64"] for Super Mario 64, ["PS2"] for Jak and Daxter, ["PS1"] for Metal Gear Solid). Pick from or match these canonical names:
+   ${KNOWN_CONSOLES.join(", ")}
+4. "platforms": An array of target operating systems and platforms supported or targeted by this PORT project (e.g. ["Windows", "Linux", "macOS", "Steam Deck", "Android", "iOS", "Nintendo Switch", "PS Vita"]). Keep these separate from original console releases.
+5. "latestRelease":
    - If a latest release exists in the repository data, populate:
      - "version": the version string or tag (e.g. "v2.0.3").
      - "date": the release date in a clean readable format (e.g. "YYYY-MM-DD" or "Month DD, YYYY").
@@ -96,8 +100,9 @@ Return ONLY valid JSON (no markdown fences, no conversational preamble or postsc
    - If there is NO release in the repository data, set "latestRelease" to null.
 `.trim();
 
-  // Call Google Gemini API (gemini-2.0-flash)
-  const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`;
+  // Determine model: default to "gemini-3.5-flash-lite", overridable via GEMINI_MODEL env var
+  const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash-lite";
+  const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${apiKey}`;
 
   let response: Response;
   try {
@@ -113,7 +118,6 @@ Return ONLY valid JSON (no markdown fences, no conversational preamble or postsc
           },
         ],
         generationConfig: {
-          temperature: 0.1,
           responseMimeType: "application/json",
         },
       }),
@@ -177,6 +181,12 @@ Return ONLY valid JSON (no markdown fences, no conversational preamble or postsc
       ? resultObj.originalGame.trim()
       : "Unknown Game";
 
+  // Validate consoles against the canonical KNOWN_CONSOLES list
+  const rawConsoles = Array.isArray(resultObj.consoles)
+    ? resultObj.consoles
+    : [];
+  const consoles = normalizeConsoles(rawConsoles);
+
   const rawPlatforms = Array.isArray(resultObj.platforms)
     ? resultObj.platforms
     : [];
@@ -228,6 +238,7 @@ Return ONLY valid JSON (no markdown fences, no conversational preamble or postsc
   return {
     projectName,
     originalGame,
+    consoles,
     platforms: uniquePlatforms,
     latestRelease,
   };

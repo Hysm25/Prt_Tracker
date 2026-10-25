@@ -17,7 +17,8 @@ export interface LatestRelease {
 export interface PortAnalysisResult {
   projectName: string;
   originalGame: string;
-  platforms: string[]; // e.g. ["Windows", "Linux", "macOS", "Steam Deck"]
+  consoles: string[]; // Original console(s) the game released on, e.g. ["N64", "GameCube"]
+  platforms: string[]; // Target ports, e.g. ["Windows", "Linux", "macOS", "Steam Deck"]
   latestRelease: LatestRelease | null;
 }
 
@@ -74,4 +75,17 @@ export interface AnalyzeResponse {
   repo?: GitHubRepoMetadata;
   cached?: boolean;
   error?: string;
+}
+
+/**
+ * Structure for repositories saved in localStorage
+ */
+export interface SavedRepoItem {
+  id: string; // unique lowercase key e.g. "twilitrealm/dusk"
+  owner: string;
+  repo: string;
+  url: string;
+  analyzedAt: number;
+  result: PortAnalysisResult;
+  repoMetadata?: GitHubRepoMetadata;
 }
