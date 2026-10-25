@@ -1,11 +1,16 @@
+"use client";
+
 import React from "react";
+import { useRouter } from "next/navigation";
 import { SavedRepoItem } from "@/lib/types";
 import { ConsoleChip } from "./ConsoleChip";
+import { PlatformIcon } from "@/lib/platformIcons";
+import { formatUpdatedTime } from "@/lib/time";
 
 interface SavedRepoCardProps {
   item: SavedRepoItem;
   isSelected?: boolean;
-  onSelect: (item: SavedRepoItem) => void;
+  onSelect?: (item: SavedRepoItem) => void;
   onRemove: (id: string, e: React.MouseEvent) => void;
   onReanalyze: (url: string, e: React.MouseEvent) => void;
 }
@@ -27,12 +32,13 @@ export function SavedRepoCard({
   onRemove,
   onReanalyze,
 }: SavedRepoCardProps) {
+  const router = useRouter();
   const result = item.result || {};
   const repoMetadata = item.repoMetadata;
   const url = item.url;
   const githubUrl = repoMetadata?.htmlUrl || url;
 
-  // Defensive handling for missing fields in stored entries (defaulting to "unknown")
+  // Defensive handling for missing fields in stored entries
   const projectName = result.projectName || item.repo || "Unknown Project";
   const originalGame = result.originalGame || "Unknown Game";
   const language = result.language || "unknown";
@@ -42,23 +48,40 @@ export function SavedRepoCard({
   const latestRelease = result.latestRelease || null;
 
   const approachTooltip =
-    APPROACH_TOOLTIPS[approach.toLowerCase()] || APPROACH_TOOLTIPS.unknown;
+    result.approachEvidence?.trim() ||
+    APPROACH_TOOLTIPS[approach.toLowerCase()] ||
+    APPROACH_TOOLTIPS.unknown;
+
+  const updatedLabel = formatUpdatedTime(
+    item.lastCheckedAt || item.analyzedAt
+  );
+
+  const handleCardClick = () => {
+    if (onSelect) {
+      onSelect(item);
+    }
+    router.push(
+      `/repo/${encodeURIComponent(item.owner)}/${encodeURIComponent(item.repo)}`
+    );
+  };
 
   return (
     <div
-      onClick={() => onSelect(item)}
+      onClick={handleCardClick}
       className={`group relative rounded-xl border p-5 transition-all duration-200 cursor-pointer bg-zinc-900/70 hover:bg-zinc-800/80 backdrop-blur-sm ${
         isSelected
           ? "border-indigo-500 ring-2 ring-indigo-500/30 bg-zinc-850"
           : "border-zinc-800 hover:border-zinc-700"
       }`}
     >
-      {/* Top row: Project Name & Actions */}
+      {/* Top row: Project Name, Updated Label & Actions */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="font-semibold text-base text-white truncate group-hover:text-indigo-300 transition">
-            {projectName}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-base text-white truncate group-hover:text-indigo-300 transition">
+              {projectName}
+            </h3>
+          </div>
           <p className="text-xs text-zinc-400 truncate mt-0.5">
             {originalGame}
           </p>
@@ -72,7 +95,11 @@ export function SavedRepoCard({
           {/* Re-analyze button */}
           <button
             type="button"
-            onClick={(e) => onReanalyze(url, e)}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onReanalyze(url, e);
+            }}
             className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-750 transition"
             title="Re-analyze repository"
           >
@@ -96,6 +123,9 @@ export function SavedRepoCard({
             href={githubUrl}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
             className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-750 transition"
             title="Open in GitHub"
           >
@@ -117,7 +147,11 @@ export function SavedRepoCard({
           {/* Remove button */}
           <button
             type="button"
-            onClick={(e) => onRemove(item.id, e)}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onRemove(item.id, e);
+            }}
             className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition"
             title="Remove from saved ports"
           >
@@ -138,23 +172,33 @@ export function SavedRepoCard({
         </div>
       </div>
 
-      {/* Language small tag & Approach labeled badge with tooltip */}
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <span
-          className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-zinc-800 text-zinc-300 border border-zinc-700"
-          title={`Programming language: ${language}`}
-        >
-          {language}
-        </span>
-
-        <span
-          title={approachTooltip}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/25 cursor-help"
-        >
-          <span className="text-[10px] text-amber-400/80 uppercase font-semibold">
-            Approach:
+      {/* Language small tag, Approach labeled badge & Updated X hours ago label */}
+      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-zinc-800 text-zinc-300 border border-zinc-700"
+            title={`Programming language: ${language}`}
+          >
+            {language}
           </span>
-          <span className="capitalize">{approach}</span>
+
+          <span
+            title={approachTooltip}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/25 cursor-help"
+          >
+            <span className="text-[10px] text-amber-400/80 uppercase font-semibold">
+              Approach:
+            </span>
+            <span className="capitalize">{approach}</span>
+          </span>
+        </div>
+
+        {/* Small "Updated X hours ago" label */}
+        <span
+          className="text-[11px] text-zinc-500 font-normal shrink-0"
+          title={`Last checked: ${item.lastCheckedAt || "N/A"}`}
+        >
+          {updatedLabel}
         </span>
       </div>
 
@@ -167,7 +211,7 @@ export function SavedRepoCard({
         </div>
       )}
 
-      {/* Bottom row: Version badge & Platforms summary */}
+      {/* Bottom row: Version badge & Port Platform Icons */}
       <div className="mt-3 pt-3 border-t border-zinc-800/60 flex items-center justify-between text-xs text-zinc-400">
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] font-medium text-zinc-500">Version:</span>
@@ -180,16 +224,26 @@ export function SavedRepoCard({
           )}
         </div>
 
-        <span className="text-[11px] text-zinc-500 truncate max-w-[150px]">
-          {platforms.length > 0 ? (
-            <>
-              {platforms.slice(0, 3).join(", ")}
-              {platforms.length > 3 ? ` +${platforms.length - 3}` : ""}
-            </>
-          ) : (
-            "No platform info"
-          )}
-        </span>
+        {/* Platform Icons (replacing text badges) */}
+        {platforms.length > 0 ? (
+          <div className="flex items-center gap-1.5 text-zinc-400">
+            {platforms.map((platform) => (
+              <span
+                key={platform}
+                className="p-1 rounded bg-zinc-800/80 border border-zinc-700/80 text-zinc-300 hover:text-white transition flex items-center justify-center"
+                title={platform}
+              >
+                <PlatformIcon
+                  platform={platform}
+                  className="w-3.5 h-3.5"
+                  showTooltip={true}
+                />
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span className="text-[11px] text-zinc-500 italic">No platform info</span>
+        )}
       </div>
     </div>
   );

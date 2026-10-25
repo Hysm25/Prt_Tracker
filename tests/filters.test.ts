@@ -189,6 +189,29 @@ describe("filterSavedRepos", () => {
       });
       expect(results.length).toBe(0);
     });
+
+    it("evaluates multiple OR selections across multiple AND groups", () => {
+      // (Windows OR Android) AND (GameCube OR N64)
+      const results = filterSavedRepos(mockRepos, {
+        platforms: ["Windows", "Android"],
+        consoles: ["GameCube", "N64"],
+      });
+      expect(results.map((r) => r.id)).toEqual([
+        "twilitrealm/dusk",
+        "harbourmasters/shipwright",
+      ]);
+    });
+
+    it("matches approach case-insensitively with uppercase or lowercase filter", () => {
+      const resultsUpper = filterSavedRepos(mockRepos, {
+        approaches: ["Decompilation"],
+      });
+      const resultsLower = filterSavedRepos(mockRepos, {
+        approaches: ["decompilation"],
+      });
+      expect(resultsUpper.map((r) => r.id)).toEqual(resultsLower.map((r) => r.id));
+      expect(resultsUpper.length).toBe(3);
+    });
   });
 
   describe("Defensive error handling", () => {

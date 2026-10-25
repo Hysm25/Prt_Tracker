@@ -1,6 +1,7 @@
 import React from "react";
 import { PortAnalysisResult, GitHubRepoMetadata } from "@/lib/types";
 import { ConsoleChip } from "./ConsoleChip";
+import { PlatformIcon } from "@/lib/platformIcons";
 
 interface ResultCardProps {
   result: PortAnalysisResult;
@@ -66,7 +67,9 @@ export function ResultCard({ result, repo, cached }: ResultCardProps) {
   const latestRelease = result.latestRelease || null;
 
   const approachTooltip =
-    APPROACH_TOOLTIPS[approach.toLowerCase()] || APPROACH_TOOLTIPS.unknown;
+    result.approachEvidence?.trim() ||
+    APPROACH_TOOLTIPS[approach.toLowerCase()] ||
+    APPROACH_TOOLTIPS.unknown;
 
   return (
     <div className="w-full max-w-2xl mx-auto rounded-2xl border border-zinc-800 bg-zinc-900/90 shadow-2xl backdrop-blur-xl p-6 sm:p-8 transition-all hover:border-zinc-700">
@@ -230,22 +233,30 @@ export function ResultCard({ result, repo, cached }: ResultCardProps) {
         </div>
       )}
 
-      {/* Target Platforms Badges */}
+      {/* Target Platforms Icons */}
       <div className="py-5 border-b border-zinc-800/80">
         <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
           Port Target Platforms
         </span>
         <div className="mt-3 flex flex-wrap gap-2">
-          {platforms.map((platform) => (
-            <span
-              key={platform}
-              className={`inline-flex items-center px-3 py-1 rounded-md text-xs font-medium border ${getPlatformBadgeClasses(
-                platform
-              )}`}
-            >
-              {platform}
-            </span>
-          ))}
+          {platforms.length > 0 ? (
+            platforms.map((platform) => (
+              <span
+                key={platform}
+                title={platform}
+                aria-label={platform}
+                className="inline-flex items-center justify-center p-2.5 rounded-xl border border-zinc-800 bg-zinc-800/80 text-zinc-300 hover:text-white hover:border-zinc-700 transition"
+              >
+                <PlatformIcon
+                  platform={platform}
+                  className="w-5 h-5"
+                  showTooltip={true}
+                />
+              </span>
+            ))
+          ) : (
+            <span className="text-xs text-zinc-500 italic">No platform info</span>
+          )}
         </div>
       </div>
 

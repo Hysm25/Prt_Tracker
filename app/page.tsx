@@ -3,7 +3,9 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { ResultCard } from "@/components/ResultCard";
 import { SavedRepoCard } from "@/components/SavedRepoCard";
-import { ConsoleChip } from "@/components/ConsoleChip";
+import { FilterDropdown, FilterDropdownOption } from "@/components/FilterDropdown";
+import { PlatformIcon } from "@/lib/platformIcons";
+import { isOlderThan24Hours } from "@/lib/time";
 import {
   AnalyzeResponse,
   PortAnalysisResult,
@@ -65,11 +67,71 @@ export default function HomePage() {
   const [selectedApproaches, setSelectedApproaches] = useState<string[]>([]);
 
   const resultCardRef = useRef<HTMLDivElement>(null);
+  const refreshStartedRef = useRef(false);
 
-  // Hydrate saved repos on client mount
+  // Hydrate saved repos on client mount & run daily release refresh
   useEffect(() => {
     const initial = loadSavedRepos();
     setSavedRepos(initial);
+
+    if (refreshStartedRef.current || initial.length === 0) return;
+    refreshStartedRef.current = true;
+
+    async function runDailyReleaseRefresh(repos: SavedRepoItem[]) {
+      try {
+        let currentRepos = [...repos];
+
+        for (const item of repos) {
+          // Check if lastCheckedAt is older than 24 hours (or missing)
+          if (!isOlderThan24Hours(item.lastCheckedAt)) {
+            continue;
+          }
+
+          try {
+            const res = await fetch("/api/release", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ owner: item.owner, repo: item.repo }),
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success) {
+                currentRepos = currentRepos.map((r) => {
+                  if (r.id.toLowerCase() === item.id.toLowerCase()) {
+                    return {
+                      ...r,
+                      lastCheckedAt:
+                        data.lastCheckedAt || new Date().toISOString(),
+                      result: {
+                        ...r.result,
+                        latestRelease: data.latestRelease,
+                      },
+                    };
+                  }
+                  return r;
+                });
+                setSavedRepos(currentRepos);
+                persistSavedRepos(currentRepos);
+              }
+            }
+          } catch (itemErr) {
+            console.warn(
+              `Failed to refresh release for ${item.owner}/${item.repo}:`,
+              itemErr
+            );
+            // Failed refresh keeps old data and never breaks the page
+          }
+
+          // Short delay between refreshes to avoid hitting GitHub rate limits
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      } catch (err) {
+        console.warn("Error running daily release refresh:", err);
+      }
+    }
+
+    runDailyReleaseRefresh(initial);
   }, []);
 
   // Compute available Port Platforms from saved repos with occurrence counts
@@ -125,6 +187,38 @@ export default function HomePage() {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([name, count]) => ({ name, count }));
   }, [savedRepos]);
+
+  // Options for FilterDropdown components
+  const platformOptions: FilterDropdownOption[] = useMemo(() => {
+    return availablePlatforms.map(({ name, count }) => ({
+      value: name,
+      label: name,
+      count,
+      icon: (
+        <PlatformIcon
+          platform={name}
+          className="w-4 h-4 text-teal-400"
+          showTooltip={false}
+        />
+      ),
+    }));
+  }, [availablePlatforms]);
+
+  const consoleOptions: FilterDropdownOption[] = useMemo(() => {
+    return availableConsoles.map(({ name, count }) => ({
+      value: name,
+      label: name,
+      count,
+    }));
+  }, [availableConsoles]);
+
+  const approachOptions: FilterDropdownOption[] = useMemo(() => {
+    return availableApproaches.map(({ name, count }) => ({
+      value: name,
+      label: name.charAt(0).toUpperCase() + name.slice(1),
+      count,
+    }));
+  }, [availableApproaches]);
 
   // Filter saved repos using centralized filter logic from lib/filters.ts
   const filteredSavedRepos = useMemo(() => {
@@ -204,6 +298,7 @@ export default function HomePage() {
           repo: parsed ? parsed.repo : "repo",
           url: inputUrl,
           analyzedAt: Date.now(),
+          lastCheckedAt: new Date().toISOString(),
           result: data.data,
           repoMetadata: data.repo,
         };
@@ -281,43 +376,6 @@ export default function HomePage() {
     if (activeSavedId === idToRemove) {
       setActiveSavedId(null);
     }
-  };
-
-  // Filter toggle handlers
-  const handleTogglePlatform = (platformName: string) => {
-    setSelectedPlatforms((prev) =>
-      prev.includes(platformName)
-        ? prev.filter((p) => p !== platformName)
-        : [...prev, platformName]
-    );
-  };
-
-  const handleClearPlatforms = () => {
-    setSelectedPlatforms([]);
-  };
-
-  const handleToggleConsole = (consoleName: string) => {
-    setSelectedConsoles((prev) =>
-      prev.includes(consoleName)
-        ? prev.filter((c) => c !== consoleName)
-        : [...prev, consoleName]
-    );
-  };
-
-  const handleClearConsoles = () => {
-    setSelectedConsoles([]);
-  };
-
-  const handleToggleApproach = (approachName: string) => {
-    setSelectedApproaches((prev) =>
-      prev.includes(approachName)
-        ? prev.filter((a) => a !== approachName)
-        : [...prev, approachName]
-    );
-  };
-
-  const handleClearApproaches = () => {
-    setSelectedApproaches([]);
   };
 
   const handleClearAllFilters = () => {
@@ -535,135 +593,38 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Filter Section: Three distinct groups with independent chips and clear buttons */}
+            {/* Filter Section: Three Dropdown Menus */}
             {savedRepos.length > 0 &&
               (availablePlatforms.length > 0 ||
                 availableConsoles.length > 0 ||
                 availableApproaches.length > 0) && (
-                <div className="mb-6 space-y-4 p-5 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 backdrop-blur-sm">
-                  {/* Group 1: Port platforms (Teal Accent) */}
-                  {availablePlatforms.length > 0 && (
-                    <div>
-                      <div className="flex items-center justify-between gap-3 mb-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold uppercase tracking-wider text-teal-400">
-                            Port platforms
-                          </span>
-                          <span className="text-[11px] text-zinc-500">
-                            (Target OS / devices)
-                          </span>
-                        </div>
-                        {selectedPlatforms.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={handleClearPlatforms}
-                            className="text-xs text-teal-400 hover:text-teal-300 underline underline-offset-2 transition cursor-pointer"
-                          >
-                            Clear ({selectedPlatforms.length})
-                          </button>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {availablePlatforms.map(({ name, count }) => (
-                          <ConsoleChip
-                            key={name}
-                            name={name}
-                            count={count}
-                            selected={selectedPlatforms.includes(name)}
-                            onClick={() => handleTogglePlatform(name)}
-                            color="teal"
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                <div className="mb-6 flex flex-wrap items-center gap-3 p-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 backdrop-blur-sm">
+                  <FilterDropdown
+                    label="Port platforms"
+                    options={platformOptions}
+                    selectedValues={selectedPlatforms}
+                    onChange={setSelectedPlatforms}
+                    onClear={() => setSelectedPlatforms([])}
+                    color="teal"
+                  />
 
-                  {/* Group 2: Original consoles (Purple Accent) */}
-                  {availableConsoles.length > 0 && (
-                    <div
-                      className={
-                        availablePlatforms.length > 0
-                          ? "pt-4 border-t border-zinc-800/60"
-                          : ""
-                      }
-                    >
-                      <div className="flex items-center justify-between gap-3 mb-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold uppercase tracking-wider text-purple-400">
-                            Original consoles
-                          </span>
-                          <span className="text-[11px] text-zinc-500">
-                            (Native hardware release)
-                          </span>
-                        </div>
-                        {selectedConsoles.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={handleClearConsoles}
-                            className="text-xs text-purple-400 hover:text-purple-300 underline underline-offset-2 transition cursor-pointer"
-                          >
-                            Clear ({selectedConsoles.length})
-                          </button>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {availableConsoles.map(({ name, count }) => (
-                          <ConsoleChip
-                            key={name}
-                            name={name}
-                            count={count}
-                            selected={selectedConsoles.includes(name)}
-                            onClick={() => handleToggleConsole(name)}
-                            color="purple"
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <FilterDropdown
+                    label="Original consoles"
+                    options={consoleOptions}
+                    selectedValues={selectedConsoles}
+                    onChange={setSelectedConsoles}
+                    onClear={() => setSelectedConsoles([])}
+                    color="purple"
+                  />
 
-                  {/* Group 3: Approach (Amber Accent) */}
-                  {availableApproaches.length > 0 && (
-                    <div
-                      className={
-                        availablePlatforms.length > 0 ||
-                        availableConsoles.length > 0
-                          ? "pt-4 border-t border-zinc-800/60"
-                          : ""
-                      }
-                    >
-                      <div className="flex items-center justify-between gap-3 mb-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold uppercase tracking-wider text-amber-400">
-                            Approach
-                          </span>
-                          <span className="text-[11px] text-zinc-500">
-                            (Porting methodology)
-                          </span>
-                        </div>
-                        {selectedApproaches.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={handleClearApproaches}
-                            className="text-xs text-amber-400 hover:text-amber-300 underline underline-offset-2 transition cursor-pointer"
-                          >
-                            Clear ({selectedApproaches.length})
-                          </button>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {availableApproaches.map(({ name, count }) => (
-                          <ConsoleChip
-                            key={name}
-                            name={name}
-                            count={count}
-                            selected={selectedApproaches.includes(name)}
-                            onClick={() => handleToggleApproach(name)}
-                            color="amber"
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <FilterDropdown
+                    label="Approach"
+                    options={approachOptions}
+                    selectedValues={selectedApproaches}
+                    onChange={setSelectedApproaches}
+                    onClear={() => setSelectedApproaches([])}
+                    color="amber"
+                  />
                 </div>
               )}
 

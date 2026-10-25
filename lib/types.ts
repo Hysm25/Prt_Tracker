@@ -12,6 +12,11 @@ export type PortApproach =
   | "unknown";
 
 /**
+ * Confidence level in the detected porting approach
+ */
+export type ConfidenceLevel = "high" | "medium" | "low";
+
+/**
  * Information regarding the latest release of the game port
  */
 export interface LatestRelease {
@@ -28,6 +33,8 @@ export interface PortAnalysisResult {
   originalGame: string;
   language: string; // main programming language, or "unknown"
   approach: PortApproach; // exactly one of "recompilation", "decompilation", "reimplementation", "unknown"
+  approachEvidence?: string | null; // quote of <= 20 words or path from repo supporting the approach
+  confidence?: ConfidenceLevel; // "high" | "medium" | "low"
   consoles: string[]; // Original console(s) the game released on, e.g. ["N64", "GameCube"]
   platforms: string[]; // Target ports, e.g. ["Windows", "Linux", "macOS", "Steam Deck"]
   latestRelease: LatestRelease | null;
@@ -43,6 +50,7 @@ export interface GitHubRepoMetadata {
   topics: string[];
   homepage: string | null;
   htmlUrl: string;
+  defaultBranch?: string;
   stars: number;
   forks: number;
   openIssues: number;
@@ -75,6 +83,9 @@ export interface GitHubRepoData {
   metadata: GitHubRepoMetadata;
   readme: string | null;
   release: GitHubReleaseData | null;
+  languages?: Record<string, number>;
+  primaryLanguage?: string | null;
+  fileTree?: string[];
 }
 
 /**
@@ -89,6 +100,16 @@ export interface AnalyzeResponse {
 }
 
 /**
+ * API response structure for /api/release
+ */
+export interface ReleaseResponse {
+  success: boolean;
+  latestRelease: LatestRelease | null;
+  lastCheckedAt?: string;
+  error?: string;
+}
+
+/**
  * Structure for repositories saved in localStorage
  */
 export interface SavedRepoItem {
@@ -97,6 +118,7 @@ export interface SavedRepoItem {
   repo: string;
   url: string;
   analyzedAt: number;
+  lastCheckedAt?: string; // ISO timestamp string of the last release check
   result: PortAnalysisResult;
   repoMetadata?: GitHubRepoMetadata;
 }

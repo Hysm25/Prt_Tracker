@@ -1,4 +1,12 @@
-import { GitHubRepoData, GitHubRepoMetadata, GitHubReleaseData } from "./types";
+import {
+  GitHubRepoData,
+  GitHubRepoMetadata,
+  GitHubReleaseData,
+  LatestRelease,
+} from "./types";
+import { selectPrimaryLanguage, filterAndTruncateTree } from "./analysis";
+
+export { selectPrimaryLanguage, filterAndTruncateTree };
 
 /**
  * Validates and extracts owner and repo name from a GitHub URL string.
@@ -99,6 +107,8 @@ export async function fetchGitHubRepoData(
 
   const repoJson = await repoRes.json();
 
+  const defaultBranch = repoJson.default_branch || "main";
+
   const metadata: GitHubRepoMetadata = {
     name: repoJson.name || repo,
     fullName: repoJson.full_name || `${owner}/${repo}`,
@@ -106,6 +116,7 @@ export async function fetchGitHubRepoData(
     topics: Array.isArray(repoJson.topics) ? repoJson.topics : [],
     homepage: repoJson.homepage || null,
     htmlUrl: repoJson.html_url || `https://github.com/${owner}/${repo}`,
+    defaultBranch,
     stars: repoJson.stargazers_count ?? 0,
     forks: repoJson.forks_count ?? 0,
     openIssues: repoJson.open_issues_count ?? 0,
@@ -177,9 +188,121 @@ export async function fetchGitHubRepoData(
     console.warn(`Error fetching release for ${owner}/${repo}:`, err);
   }
 
+  // 4. Fetch Languages (GET /repos/{owner}/{repo}/languages)
+  let languages: Record<string, number> = {};
+  let primaryLanguage: string | null = null;
+  try {
+    const langRes = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/languages`,
+      {
+        headers,
+        redirect: "follow",
+        next: { revalidate: 0 },
+      }
+    );
+
+    if (langRes.ok) {
+      languages = await langRes.json();
+      primaryLanguage = selectPrimaryLanguage(languages);
+    } else {
+      console.warn(
+        `Failed to fetch languages for ${owner}/${repo}: ${langRes.status}`
+      );
+    }
+  } catch (err) {
+    console.warn(`Error fetching languages for ${owner}/${repo}:`, err);
+  }
+
+  // 5. Fetch Repository File Tree (GET /repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1)
+  let fileTree: string[] = [];
+  try {
+    const treeRes = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(defaultBranch)}?recursive=1`,
+      {
+        headers,
+        redirect: "follow",
+        next: { revalidate: 0 },
+      }
+    );
+
+    if (treeRes.ok) {
+      const treeJson = await treeRes.json();
+      const rawTreeItems: Array<{ path?: string; type?: string }> =
+        Array.isArray(treeJson.tree) ? treeJson.tree : [];
+
+      // Extract file paths (blobs only, ignoring directory trees)
+      const rawFilePaths = rawTreeItems
+        .filter((item) => item.type === "blob" && typeof item.path === "string")
+        .map((item) => item.path as string);
+
+      fileTree = filterAndTruncateTree(rawFilePaths, 150);
+    } else {
+      console.warn(
+        `Failed to fetch git tree for ${owner}/${repo} on branch ${defaultBranch}: ${treeRes.status}`
+      );
+    }
+  } catch (err) {
+    console.warn(`Error fetching git tree for ${owner}/${repo}:`, err);
+  }
+
   return {
     metadata,
     readme,
     release,
+    languages,
+    primaryLanguage,
+    fileTree,
   };
 }
+
+/**
+ * Lightweight fetch of only the latest release for a repository (GET /repos/{owner}/{repo}/releases/latest).
+ * Returns null if no release exists (e.g. 404).
+ */
+export async function fetchLatestReleaseOnly(
+  owner: string,
+  repo: string
+): Promise<LatestRelease | null> {
+  const headers = getGitHubHeaders();
+
+  const releaseRes = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/releases/latest`,
+    {
+      headers,
+      redirect: "follow",
+      next: { revalidate: 0 },
+    }
+  );
+
+  if (releaseRes.status === 404) {
+    return null;
+  }
+
+  if (!releaseRes.ok) {
+    if (releaseRes.status === 403 || releaseRes.status === 429) {
+      const rateLimitRemaining = releaseRes.headers.get("x-ratelimit-remaining");
+      if (rateLimitRemaining === "0") {
+        throw new Error("GitHub API rate limit exceeded.");
+      }
+    }
+    throw new Error(
+      `GitHub API error (${releaseRes.status}): ${releaseRes.statusText}`
+    );
+  }
+
+  const releaseJson = await releaseRes.json();
+  const version = releaseJson.tag_name || releaseJson.name || "Latest";
+  const date = (releaseJson.published_at || new Date().toISOString()).slice(0, 10);
+  const downloadUrl =
+    (Array.isArray(releaseJson.assets) &&
+      releaseJson.assets[0]?.browser_download_url) ||
+    releaseJson.html_url ||
+    null;
+
+  return {
+    version,
+    date,
+    downloadUrl,
+  };
+}
+
