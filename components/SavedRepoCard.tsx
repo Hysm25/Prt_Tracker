@@ -17,8 +17,17 @@ export function SavedRepoCard({
   onRemove,
   onReanalyze,
 }: SavedRepoCardProps) {
-  const { result, repoMetadata, url } = item;
+  const result = item.result || {};
+  const repoMetadata = item.repoMetadata;
+  const url = item.url;
   const githubUrl = repoMetadata?.htmlUrl || url;
+
+  // Defensive handling for missing fields in stored entries
+  const projectName = result.projectName || item.repo || "Unknown Project";
+  const originalGame = result.originalGame || "Unknown Game";
+  const consoles = Array.isArray(result.consoles) ? result.consoles : [];
+  const platforms = Array.isArray(result.platforms) ? result.platforms : [];
+  const latestRelease = result.latestRelease || null;
 
   return (
     <div
@@ -33,10 +42,10 @@ export function SavedRepoCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="font-semibold text-base text-white truncate group-hover:text-indigo-300 transition">
-            {result.projectName}
+            {projectName}
           </h3>
           <p className="text-xs text-zinc-400 truncate mt-0.5">
-            {result.originalGame}
+            {originalGame}
           </p>
         </div>
 
@@ -81,11 +90,11 @@ export function SavedRepoCard({
         </div>
       </div>
 
-      {/* Middle row: Console Tags */}
-      {result.consoles && result.consoles.length > 0 && (
+      {/* Middle row: Original Console Tags */}
+      {consoles.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
-          {result.consoles.map((c) => (
-            <ConsoleChip key={c} name={c} interactive={false} />
+          {consoles.map((c) => (
+            <ConsoleChip key={c} name={c} interactive={false} color="purple" />
           ))}
         </div>
       )}
@@ -94,9 +103,9 @@ export function SavedRepoCard({
       <div className="mt-3 pt-3 border-t border-zinc-800/60 flex items-center justify-between text-xs text-zinc-400">
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] font-medium text-zinc-500">Version:</span>
-          {result.latestRelease ? (
+          {latestRelease ? (
             <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              {result.latestRelease.version}
+              {latestRelease.version}
             </span>
           ) : (
             <span className="text-[11px] text-zinc-500 italic">No release</span>
@@ -104,8 +113,14 @@ export function SavedRepoCard({
         </div>
 
         <span className="text-[11px] text-zinc-500 truncate max-w-[150px]">
-          {result.platforms.slice(0, 3).join(", ")}
-          {result.platforms.length > 3 ? ` +${result.platforms.length - 3}` : ""}
+          {platforms.length > 0 ? (
+            <>
+              {platforms.slice(0, 3).join(", ")}
+              {platforms.length > 3 ? ` +${platforms.length - 3}` : ""}
+            </>
+          ) : (
+            "No platform info"
+          )}
         </span>
       </div>
     </div>

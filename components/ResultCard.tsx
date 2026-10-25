@@ -38,7 +38,11 @@ function getPlatformBadgeClasses(platform: string): string {
 }
 
 export function ResultCard({ result, repo, cached }: ResultCardProps) {
-  const { projectName, originalGame, consoles, platforms, latestRelease } = result;
+  const projectName = result.projectName || repo?.name || "Unknown Project";
+  const originalGame = result.originalGame || "Unknown Game";
+  const consoles = Array.isArray(result.consoles) ? result.consoles : [];
+  const platforms = Array.isArray(result.platforms) ? result.platforms : [];
+  const latestRelease = result.latestRelease || null;
 
   return (
     <div className="w-full max-w-2xl mx-auto rounded-2xl border border-zinc-800 bg-zinc-900/90 shadow-2xl backdrop-blur-xl p-6 sm:p-8 transition-all hover:border-zinc-700">

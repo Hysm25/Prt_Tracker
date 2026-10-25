@@ -57,6 +57,9 @@ export default function HomePage() {
 
   // Persistent tracked repos from localStorage
   const [savedRepos, setSavedRepos] = useState<SavedRepoItem[]>([]);
+
+  // Two independent filter groups: Port platforms (teal) and Original consoles (purple)
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [selectedConsoles, setSelectedConsoles] = useState<string[]>([]);
 
   const resultCardRef = useRef<HTMLDivElement>(null);
@@ -67,15 +70,18 @@ export default function HomePage() {
     setSavedRepos(initial);
   }, []);
 
-  // Compute available native platforms from currently saved repositories with counts
-  const availableConsoles = useMemo(() => {
+  // Compute available Port Platforms from saved repos with occurrence counts
+  const availablePlatforms = useMemo(() => {
     const map = new Map<string, number>();
     for (const item of savedRepos) {
-      const consoles = item.result.consoles;
-      if (Array.isArray(consoles)) {
-        for (const c of consoles) {
-          if (c && typeof c === "string") {
-            map.set(c, (map.get(c) || 0) + 1);
+      const platforms = Array.isArray(item.result?.platforms)
+        ? item.result.platforms
+        : [];
+      for (const p of platforms) {
+        if (p && typeof p === "string") {
+          const clean = p.trim();
+          if (clean) {
+            map.set(clean, (map.get(clean) || 0) + 1);
           }
         }
       }
@@ -85,23 +91,75 @@ export default function HomePage() {
       .map(([name, count]) => ({ name, count }));
   }, [savedRepos]);
 
-  // Filtered saved repos based on selected native platform filter chips
-  const filteredSavedRepos = useMemo(() => {
-    if (selectedConsoles.length === 0) {
-      return savedRepos;
-    }
-    return savedRepos.filter((item) => {
-      const itemConsoles = item.result.consoles;
-      // Repos with an empty consoles array should be hidden when any filter is active
-      if (!Array.isArray(itemConsoles) || itemConsoles.length === 0) {
-        return false;
+  // Compute available Original Consoles from saved repos with occurrence counts
+  const availableConsoles = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of savedRepos) {
+      const consoles = Array.isArray(item.result?.consoles)
+        ? item.result.consoles
+        : [];
+      for (const c of consoles) {
+        if (c && typeof c === "string") {
+          const clean = c.trim();
+          if (clean) {
+            map.set(clean, (map.get(clean) || 0) + 1);
+          }
+        }
       }
-      // OR logic: show repo if its native platforms include at least one selected value
-      return selectedConsoles.some((selected) =>
-        itemConsoles.includes(selected)
-      );
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }));
+  }, [savedRepos]);
+
+  /**
+   * Filter logic:
+   * - Within a single group: OR logic (any selected value matches).
+   * - Between groups: AND logic (repo must match a selected port platform AND a selected console).
+   * - A group with no selections does not restrict results.
+   * - Repos with an empty array in a group are hidden only while that group has an active selection.
+   */
+  const filteredSavedRepos = useMemo(() => {
+    return savedRepos.filter((item) => {
+      const itemPlatforms = Array.isArray(item.result?.platforms)
+        ? item.result.platforms
+        : [];
+      const itemConsoles = Array.isArray(item.result?.consoles)
+        ? item.result.consoles
+        : [];
+
+      // 1. Check Port platforms filter group
+      if (selectedPlatforms.length > 0) {
+        if (itemPlatforms.length === 0) {
+          return false;
+        }
+        const matchesPlatform = selectedPlatforms.some((sp) =>
+          itemPlatforms.includes(sp)
+        );
+        if (!matchesPlatform) {
+          return false;
+        }
+      }
+
+      // 2. Check Original consoles filter group
+      if (selectedConsoles.length > 0) {
+        if (itemConsoles.length === 0) {
+          return false;
+        }
+        const matchesConsole = selectedConsoles.some((sc) =>
+          itemConsoles.includes(sc)
+        );
+        if (!matchesConsole) {
+          return false;
+        }
+      }
+
+      return true;
     });
-  }, [savedRepos, selectedConsoles]);
+  }, [savedRepos, selectedPlatforms, selectedConsoles]);
+
+  const hasActiveFilters =
+    selectedPlatforms.length > 0 || selectedConsoles.length > 0;
 
   // Client-side quick validation for github.com URLs
   const validateUrl = (input: string): boolean => {
@@ -181,7 +239,10 @@ export default function HomePage() {
 
         // Scroll smoothly to results card
         setTimeout(() => {
-          resultCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          resultCardRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
         }, 100);
       } else {
         throw new Error("No analysis data returned from server.");
@@ -212,7 +273,10 @@ export default function HomePage() {
     setActiveSavedId(saved.id);
 
     setTimeout(() => {
-      resultCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      resultCardRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
     }, 100);
   };
 
@@ -239,8 +303,20 @@ export default function HomePage() {
     }
   };
 
-  // Toggle native platform filter chip
-  const handleToggleConsoleFilter = (consoleName: string) => {
+  // Toggle filter chips
+  const handleTogglePlatform = (platformName: string) => {
+    setSelectedPlatforms((prev) =>
+      prev.includes(platformName)
+        ? prev.filter((p) => p !== platformName)
+        : [...prev, platformName]
+    );
+  };
+
+  const handleClearPlatforms = () => {
+    setSelectedPlatforms([]);
+  };
+
+  const handleToggleConsole = (consoleName: string) => {
     setSelectedConsoles((prev) =>
       prev.includes(consoleName)
         ? prev.filter((c) => c !== consoleName)
@@ -248,8 +324,12 @@ export default function HomePage() {
     );
   };
 
-  // Clear all selected native platform filters
-  const handleClearFilters = () => {
+  const handleClearConsoles = () => {
+    setSelectedConsoles([]);
+  };
+
+  const handleClearAllFilters = () => {
+    setSelectedPlatforms([]);
     setSelectedConsoles([]);
   };
 
@@ -274,14 +354,18 @@ export default function HomePage() {
             </h1>
 
             <p className="max-w-xl mx-auto text-base sm:text-lg text-zinc-400">
-              Analyze unofficial video game ports, decompilations, and engine recreations.
-              Identify original consoles, target platforms, and latest releases.
+              Analyze unofficial video game ports, decompilations, and engine
+              recreations. Identify original consoles, target platforms, and
+              latest releases.
             </p>
           </header>
 
           {/* Form Section */}
           <section className="mt-8 sm:mt-10 max-w-2xl mx-auto">
-            <form onSubmit={handleSubmit} className="relative flex flex-col sm:flex-row gap-3">
+            <form
+              onSubmit={handleSubmit}
+              className="relative flex flex-col sm:flex-row gap-3"
+            >
               <div className="relative flex-1">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-500">
                   {/* GitHub Icon */}
@@ -337,8 +421,18 @@ export default function HomePage() {
                 ) : (
                   <>
                     <span>Analyze Port</span>
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M14 5l7 7m0 0l-7 7m7-7H3"
+                      />
                     </svg>
                   </>
                 )}
@@ -350,15 +444,26 @@ export default function HomePage() {
           {loading && (
             <div className="mt-12 max-w-2xl mx-auto rounded-2xl border border-zinc-800 bg-zinc-900/50 p-8 text-center space-y-4">
               <div className="inline-flex p-3 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 animate-pulse">
-                <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                <svg
+                  className="w-7 h-7"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                  />
                 </svg>
               </div>
               <h3 className="text-lg font-semibold text-white">
                 Analyzing Game Port Repository
               </h3>
               <p className="text-sm text-zinc-400 max-w-md mx-auto">
-                Fetching repository metadata, parsing raw README documentation, and prompting Gemini to extract original console and port details...
+                Fetching repository metadata, parsing raw README documentation,
+                and prompting Gemini to extract original console and port details...
               </p>
               <div className="w-48 h-1.5 bg-zinc-800 rounded-full mx-auto overflow-hidden">
                 <div className="w-full h-full bg-indigo-500 origin-left animate-pulse" />
@@ -369,8 +474,18 @@ export default function HomePage() {
           {/* Error Message Box */}
           {error && !loading && (
             <div className="mt-8 max-w-2xl mx-auto rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-200 flex items-start gap-3">
-              <svg className="w-5 h-5 text-red-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              <svg
+                className="w-5 h-5 text-red-400 shrink-0 mt-0.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
               </svg>
               <div className="flex-1 text-sm">
                 <p className="font-semibold text-red-300">Analysis Error</p>
@@ -382,8 +497,18 @@ export default function HomePage() {
                 className="text-red-400 hover:text-red-200 transition"
                 title="Dismiss"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
               </button>
             </div>
@@ -392,7 +517,11 @@ export default function HomePage() {
           {/* Result Card */}
           {result && !loading && (
             <div ref={resultCardRef} className="mt-8 sm:mt-12">
-              <ResultCard result={result} repo={repo || undefined} cached={cached} />
+              <ResultCard
+                result={result}
+                repo={repo || undefined}
+                cached={cached}
+              />
             </div>
           )}
 
@@ -407,50 +536,134 @@ export default function HomePage() {
                   </span>
                 </h2>
                 <p className="text-xs text-zinc-400 mt-1">
-                  Repositories saved locally. Click any project to view its analysis or re-analyze.
+                  Repositories saved locally. Click any project to view its
+                  analysis or re-analyze.
                 </p>
               </div>
             </div>
 
-            {/* Native Platform Filter Section */}
-            {savedRepos.length > 0 && availableConsoles.length > 0 && (
-              <div className="mb-6 p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/60 backdrop-blur-sm">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
-                      Filter by Native Platform:
-                    </span>
-                    <span className="text-[11px] text-zinc-500">
-                      (Original consoles)
-                    </span>
-                  </div>
+            {/* Filter Section: Two distinct groups with independent chips and clear buttons */}
+            {savedRepos.length > 0 &&
+              (availablePlatforms.length > 0 || availableConsoles.length > 0) && (
+                <div className="mb-6 space-y-4 p-5 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 backdrop-blur-sm">
+                  {/* Group 1: Port platforms (Teal Accent) */}
+                  {availablePlatforms.length > 0 && (
+                    <div>
+                      <div className="flex items-center justify-between gap-3 mb-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-wider text-teal-400">
+                            Port platforms
+                          </span>
+                          <span className="text-[11px] text-zinc-500">
+                            (Target OS / devices)
+                          </span>
+                        </div>
+                        {selectedPlatforms.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleClearPlatforms}
+                            className="text-xs text-teal-400 hover:text-teal-300 underline underline-offset-2 transition cursor-pointer"
+                          >
+                            Clear ({selectedPlatforms.length})
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {availablePlatforms.map(({ name, count }) => (
+                          <ConsoleChip
+                            key={name}
+                            name={name}
+                            count={count}
+                            selected={selectedPlatforms.includes(name)}
+                            onClick={() => handleTogglePlatform(name)}
+                            color="teal"
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-                  {selectedConsoles.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleClearFilters}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-zinc-300 hover:text-white bg-zinc-800 hover:bg-zinc-700 transition"
-                      title="Clear selected platform filters"
+                  {/* Group 2: Original consoles (Purple Accent) */}
+                  {availableConsoles.length > 0 && (
+                    <div
+                      className={
+                        availablePlatforms.length > 0
+                          ? "pt-4 border-t border-zinc-800/60"
+                          : ""
+                      }
                     >
-                      <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                      <span>Clear ({selectedConsoles.length})</span>
-                    </button>
+                      <div className="flex items-center justify-between gap-3 mb-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-wider text-purple-400">
+                            Original consoles
+                          </span>
+                          <span className="text-[11px] text-zinc-500">
+                            (Native hardware release)
+                          </span>
+                        </div>
+                        {selectedConsoles.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleClearConsoles}
+                            className="text-xs text-purple-400 hover:text-purple-300 underline underline-offset-2 transition cursor-pointer"
+                          >
+                            Clear ({selectedConsoles.length})
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {availableConsoles.map(({ name, count }) => (
+                          <ConsoleChip
+                            key={name}
+                            name={name}
+                            count={count}
+                            selected={selectedConsoles.includes(name)}
+                            onClick={() => handleToggleConsole(name)}
+                            color="purple"
+                          />
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
+              )}
 
-                <div className="flex flex-wrap gap-2">
-                  {availableConsoles.map(({ name, count }) => (
-                    <ConsoleChip
-                      key={name}
-                      name={name}
-                      count={count}
-                      selected={selectedConsoles.includes(name)}
-                      onClick={() => handleToggleConsoleFilter(name)}
-                    />
-                  ))}
+            {/* Result count & Clear all filters bar */}
+            {savedRepos.length > 0 && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-2 border-b border-zinc-800/60">
+                <div className="text-sm text-zinc-400">
+                  Showing{" "}
+                  <span className="font-semibold text-white">
+                    {filteredSavedRepos.length}
+                  </span>{" "}
+                  of{" "}
+                  <span className="font-semibold text-white">
+                    {savedRepos.length}
+                  </span>{" "}
+                  repos
                 </div>
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={handleClearAllFilters}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium text-indigo-400 hover:text-white bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 transition self-start sm:self-auto cursor-pointer"
+                  >
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                    <span>Clear all filters</span>
+                  </button>
+                )}
               </div>
             )}
 
@@ -471,14 +684,14 @@ export default function HomePage() {
             ) : savedRepos.length > 0 ? (
               <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/40 p-8 text-center text-zinc-400">
                 <p className="text-sm">
-                  No saved repositories match the selected native platform filter.
+                  No saved repositories match the selected filter combination.
                 </p>
                 <button
                   type="button"
-                  onClick={handleClearFilters}
-                  className="mt-3 inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition"
+                  onClick={handleClearAllFilters}
+                  className="mt-3 inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition cursor-pointer"
                 >
-                  Clear platform filters
+                  Clear all filters
                 </button>
               </div>
             ) : (
@@ -500,7 +713,8 @@ export default function HomePage() {
                   No repositories tracked yet
                 </p>
                 <p className="text-xs text-zinc-500 mt-1">
-                  Paste a game port repository URL above to analyze and automatically save it to your tracked list.
+                  Paste a game port repository URL above to analyze and
+                  automatically save it to your tracked list.
                 </p>
               </div>
             )}
